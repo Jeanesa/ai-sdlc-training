@@ -46,6 +46,20 @@ supabase/
 
 Copy `.env.example` to `.env.local` and fill in your Supabase and Resend credentials.
 
+## CI/CD & Rollback
+
+Two GitHub Actions workflows enforce quality and automate deployments:
+
+- **`pr.yml`** — Triggered on every pull request. Runs lint, typecheck, and tests, then validates migrations against the Supabase staging project. The PR fails if any step fails.
+- **`deploy.yml`** — Triggered on every merge to `main`. Runs the same validation, then deploys to Vercel production and pushes migrations to the Supabase production project in parallel.
+
+External-service steps (Supabase push, Vercel deploy) are skipped when their required secrets are not yet configured, so workflows can be merged before secrets are set.
+
+### Rollback Procedures
+
+- **App code rollback**: Use the Vercel dashboard to instantly promote a previous deployment to production. This reverts application code with zero downtime.
+- **Schema rollback**: Create a new migration file that reverses the change (e.g., `ALTER TABLE ... DROP COLUMN`). Run `supabase db push` to apply it. Never modify or delete a committed migration file.
+
 ## Architecture Decisions
 
 See `knowledge/ARCH-LMS-MC-v1.0.md` for full ADR documentation.
