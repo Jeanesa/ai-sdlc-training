@@ -1,0 +1,19 @@
+[project]
+name = "meridian-lms"
+plan = "free"
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = []
+jwt_expiry = 3600
+enable_signup = false
+
+[db.migrations]
+directory = "supabase/migrations"
+
+[analytics]
+enabled = false
+
+[import_map]
+directory = "supabase/functions"
