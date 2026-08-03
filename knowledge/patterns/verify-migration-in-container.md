@@ -50,6 +50,14 @@ docker stop sb_intro
   even SELECT). That blocks live API probing and is out of scope for the DDL migration — flag
   it for the RLS/access-control task rather than silently adding grants.
 
+## Seed idempotency (learned on TASK-009)
+
+`supabase db reset` drops and recreates the DB from empty on every run, so running it twice does
+NOT exercise `ON CONFLICT DO NOTHING` — both runs start clean. To truly test seed idempotency,
+run the seed TWICE against a populated DB (apply migration once, then seed -> seed again) and
+confirm the second run raises no duplicate-key errors. The container flow above does exactly this;
+`db reset` twice only proves the reset flow is repeatable.
+
 ## Cross-reference
 
 - Live-structure evidence without SQL: `GET /rest/v1/` with `Accept: application/openapi+json`
