@@ -29,7 +29,7 @@
     "jsdom": "30.0.1",
     "postcss": "8.5.25",
     "prettier": "3.9.6",
-    "supabase": "^2.110.0",
+    "supabase": "^2.111.0",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "typescript-eslint": "8.65.0",
