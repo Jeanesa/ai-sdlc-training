@@ -8,3 +8,6 @@ dist/
 *.tsbuildinfo
 next-env.d.ts
 coverage/
+
+# supabase
+supabase/.temp
