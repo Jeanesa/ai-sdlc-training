@@ -1,7 +1,7 @@
 import typescriptEslint from "typescript-eslint";
 
 export default [
-  { ignores: ["node_modules/", ".next/", "out/", "dist/"] },
+  { ignores: ["node_modules/", ".next/", "out/", "dist/", "supabase/.temp/"] },
   ...typescriptEslint.configs.recommended,
   {
     rules: {
