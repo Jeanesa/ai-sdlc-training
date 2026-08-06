@@ -227,14 +227,16 @@ export default function Layout({ user, currentView, pendingCount = 0, children }
             <div className="text-white text-sm font-medium truncate">{user.fullName}</div>
             <div className="text-white/40 text-xs truncate">{user.email}</div>
           </div>
-          <button
-            onClick={() => router.push("/auth/login")}
-            className="text-white/40 hover:text-white transition-colors p-1 rounded"
-            aria-label="Sign out"
-            title="Sign out"
-          >
-            <LogoutIcon />
-          </button>
+          <form action="/auth/signout" method="post">
+            <button
+              type="submit"
+              className="text-white/40 hover:text-white transition-colors p-1 rounded"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogoutIcon />
+            </button>
+          </form>
         </div>
       </div>
     </div>
