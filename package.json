@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --project unit --passWithNoTests",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
