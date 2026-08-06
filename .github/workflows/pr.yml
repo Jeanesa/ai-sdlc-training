@@ -17,6 +17,30 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
 
+  integration:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase start
+      - run: supabase db reset
+      - name: Export Supabase local emulator env vars
+        run: |
+          supabase_status="$(supabase status -o json)"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(printf '%s' "$supabase_status" | jq -r '.API_URL // .apiUrl // "http://127.0.0.1:54321"')" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(printf '%s' "$supabase_status" | jq -r '.ANON_KEY // .anonKey')" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(printf '%s' "$supabase_status" | jq -r '.SERVICE_ROLE_KEY // .serviceRoleKey')" >> "$GITHUB_ENV"
+      - run: npm run test:integration
+
   migration-check:
     needs: validate
     runs-on: ubuntu-latest
