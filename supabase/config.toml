@@ -5,7 +5,7 @@ enabled = true
 site_url = "http://localhost:3000"
 additional_redirect_urls = []
 jwt_expiry = 3600
-enable_signup = false
+enable_signup = true
 
 [db.seed]
 enabled = true

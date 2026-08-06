@@ -1,11 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { copyAuthHeaders } from "@/lib/auth/redirects";
 import { decide, matchesGuardedRoute } from "@/lib/auth/route-guards";
 import { createProxyClient, getSessionUserId, getUserRole } from "@/lib/supabase/proxy";
 
 const LOGIN_PATH = "/auth/login";
-
-const AUTH_COOKIE_HEADERS = ["Cache-Control", "Expires", "Pragma"];
 
 function buildLoginUrl(request: NextRequest, pathname: string, search: string): URL {
   const url = request.nextUrl.clone();
@@ -20,18 +19,6 @@ function buildDashboardUrl(request: NextRequest, dashboard: string): URL {
   url.pathname = dashboard;
   url.search = "";
   return url;
-}
-
-function copyAuthHeaders(from: NextResponse, to: NextResponse): void {
-  for (const name of AUTH_COOKIE_HEADERS) {
-    const value = from.headers.get(name);
-    if (value !== null) {
-      to.headers.set(name, value);
-    }
-  }
-  for (const cookie of from.cookies.getAll()) {
-    to.cookies.set(cookie.name, cookie.value, cookie);
-  }
 }
 
 export async function proxy(request: NextRequest) {
