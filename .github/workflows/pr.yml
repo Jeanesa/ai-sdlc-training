@@ -40,18 +40,3 @@ jobs:
           echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(printf '%s' "$supabase_status" | jq -r '.ANON_KEY // .anonKey')" >> "$GITHUB_ENV"
           echo "SUPABASE_SERVICE_ROLE_KEY=$(printf '%s' "$supabase_status" | jq -r '.SERVICE_ROLE_KEY // .serviceRoleKey')" >> "$GITHUB_ENV"
       - run: npm run test:integration
-
-  migration-check:
-    needs: validate
-    runs-on: ubuntu-latest
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_STAGING_PROJECT_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-      - name: Push migrations to staging
-        if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_STAGING_PROJECT_REF != ''
-        run: supabase db push --project-ref "$SUPABASE_STAGING_PROJECT_REF"
