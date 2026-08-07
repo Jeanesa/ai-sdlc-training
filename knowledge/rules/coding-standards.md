@@ -66,3 +66,11 @@ bad/good examples so the *why* survives the *what*.
 
 - **Rule**: Use `CREATE OR REPLACE FUNCTION`, and `DROP POLICY IF EXISTS` / `DROP TRIGGER IF EXISTS` before each `CREATE`. Don't add grants/policies another migration already owns.
 - **Rationale**: `supabase db reset` re-applies every migration from scratch; idempotent statements keep re-runs clean and let each migration own its concern without collision.
+
+## Data Retention & Storage
+
+### New persistence surfaces inherit the no-hard-delete posture
+
+- **Rule**: Every new business data store — a table **or** a Supabase Storage bucket — must block hard `DELETE` for all roles **including `service_role`**, unless a decision explicitly exempts it. For Storage, add a `storage.objects` policy denying DELETE to every role; for tables, take the same no-DELETE stance as `leaves` (TASK-011). Removal happens only via the soft-delete `deleted_at` pattern on the owning business row.
+- **Rationale**: PRD FR-DATA-001/002 require 5-year retention and prohibit hard deletes on business records. Supporting documents are audit evidence for sick leave; if the `leaves` row is soft-deleted and retained but its Storage object can be hard-deleted by the owner, the evidence vanishes and the audit trail is incomplete — invisible until an auditor looks. Surfaced in Epic 2 TASK-018, whose bucket policy originally allowed owner DELETE.
+- **Scope**: Storage buckets and business tables. Auth/session/ephemeral infra tables are exempt.

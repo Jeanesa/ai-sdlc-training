@@ -16,6 +16,7 @@ through Evaluate → Plan → Apply → Validate. One epic per fresh session.
 - Task IDs are CONTINUOUS across epics (epic-0 = TASK-001…009, epic-1 = TASK-010…016; epic-2 starts at TASK-017).
 - 15-col schema: task_id,issue_type,summary,user_story,description,acceptance_criteria,priority,estimate,story_points,role,assignee,status,labels,epic_link,dependencies
 - Testing tasks are developer-owned (role Backend/Frontend/Fullstack, never QA).
+- New data store check: any task creating a table or Storage bucket must state its delete + retention posture at EVALUATE/PLAN (default: no hard delete for any role, mirror `leaves` / FR-DATA-001-002). See rules/coding-standards.md "no-hard-delete posture."
 
 ## Epic → ADR → filename map
 | Epic | ADR (docs/arch-docs/) | Output filename |

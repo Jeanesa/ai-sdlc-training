@@ -26,3 +26,4 @@
 - RLS tests assert through per-role anon-key clients, NEVER the service-role client (it bypasses RLS); empty-read cases assert empty data + no error, blocked writes assert error code 42501
 - Unit tests colocated as `*.test.{ts,tsx}` (DB-free, `npm run test`); integration tests in `tests/integration/` (`npm run test:integration`, needs the emulator). Vitest, not Jest
 - Migrations idempotent: `CREATE OR REPLACE FUNCTION`, `DROP POLICY/TRIGGER IF EXISTS` before CREATE
+- New business data stores (tables AND Storage buckets) block hard DELETE for all roles incl. service_role — removal only via soft-delete `deleted_at` (FR-DATA-001/002 retention); auth/session/ephemeral infra exempt
