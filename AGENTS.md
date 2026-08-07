@@ -21,3 +21,8 @@
 - All package versions pinned exactly (no ^ or ~ ranges)
 - ESLint uses `typescript-eslint` (not eslint-config-next); `tsconfig.json` has `noUncheckedIndexedAccess: true` and `exactOptionalPropertyTypes: true`
 - Pages using `useSearchParams()` must be wrapped in `<Suspense>`
+
+- DB functions writing to RLS/grant-restricted tables (triggers, first-login profile creation) must be SECURITY DEFINER, owner postgres, `SET search_path = ''`, fully-qualified objects
+- RLS tests assert through per-role anon-key clients, NEVER the service-role client (it bypasses RLS); empty-read cases assert empty data + no error, blocked writes assert error code 42501
+- Unit tests colocated as `*.test.{ts,tsx}` (DB-free, `npm run test`); integration tests in `tests/integration/` (`npm run test:integration`, needs the emulator). Vitest, not Jest
+- Migrations idempotent: `CREATE OR REPLACE FUNCTION`, `DROP POLICY/TRIGGER IF EXISTS` before CREATE

@@ -31,3 +31,38 @@ bad/good examples so the *why* survives the *what*.
 
 - **Scope**: Applies to `CHECK` constraint definitions and to `DEFAULT` clauses on text/enum-like
   columns. Numeric and boolean defaults (DEFAULT 0, DEFAULT false) need no quotes.
+
+
+---
+
+## Row Level Security & Database Functions
+
+### Functions that write to RLS- or grant-restricted tables must be SECURITY DEFINER
+
+- **Rule**: Any trigger or function that must write to a table protected by RLS or lacking table-level grants (e.g. `audit_log`, `profiles` on first login) must be `SECURITY DEFINER`, owned by `postgres`, with `SET search_path = ''` and fully-qualified object names (`public.<table>`).
+- **Rationale**: RLS and grants apply to the *invoking* role. A trigger firing as `authenticated`/`supabase_auth_admin` is blocked and the whole business mutation rolls back. Running as owner (`postgres`, `rolbypassrls = true`) bypasses both; `search_path = ''` blocks search-path hijacking. Recurred in TASK-012 (`handle_new_user`) and TASK-013 (`log_audit_event`).
+- **Scope**: PL/pgSQL trigger functions and RPCs writing to RLS/grant-restricted tables. Read-only helpers used *inside* policies (e.g. `current_user_role()`) also use `SECURITY DEFINER` to avoid infinite recursion when they query the table the policy protects.
+
+## Testing
+
+### Never use the service-role client for RLS assertions
+
+- **Rule**: RLS/authz tests must assert through a per-role **anon-key** client with a real signed-in session. Use the service-role client only for setup (creating users, inserting fixtures).
+- **Rationale**: `service_role` has `rolbypassrls = true`, so any query through it bypasses RLS — the assertion passes even if the policy is broken (false-green). Confirmed in TASK-016.
+
+### RLS "empty" results are not errors
+
+- **Rule**: For a role that should see no rows, assert `data` is empty **and** `error` is null. Assert an error (`code === '42501'`) only for blocked *writes* (DELETE with no grant; INSERT against a `WITH CHECK (false)` policy). Assert non-empty + a specific fixture id on "returns records" cases.
+- **Rationale**: RLS returns an empty set for disallowed reads, not an error; asserting a thrown error there is wrong and makes the test misleading.
+
+### Test location, runner, and naming
+
+- **Rule**: Unit tests are colocated as `*.test.ts` / `*.test.tsx` (jsdom via a `// @vitest-environment jsdom` docblock when rendering components); integration tests live in `tests/integration/` and run via `npm run test:integration`. `npm run test` (unit) must stay DB-free. The project uses **Vitest, not Jest**.
+- **Rationale**: Keeps the fast unit gate free of Docker/emulator dependencies and separates the two Vitest projects.
+
+## Migrations
+
+### Migrations must be idempotent and single-owner
+
+- **Rule**: Use `CREATE OR REPLACE FUNCTION`, and `DROP POLICY IF EXISTS` / `DROP TRIGGER IF EXISTS` before each `CREATE`. Don't add grants/policies another migration already owns.
+- **Rationale**: `supabase db reset` re-applies every migration from scratch; idempotent statements keep re-runs clean and let each migration own its concern without collision.
