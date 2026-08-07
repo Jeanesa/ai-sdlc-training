@@ -17,6 +17,7 @@ through Evaluate → Plan → Apply → Validate. One epic per fresh session.
 - 15-col schema: task_id,issue_type,summary,user_story,description,acceptance_criteria,priority,estimate,story_points,role,assignee,status,labels,epic_link,dependencies
 - Testing tasks are developer-owned (role Backend/Frontend/Fullstack, never QA).
 - New data store check: any task creating a table or Storage bucket must state its delete + retention posture at EVALUATE/PLAN (default: no hard delete for any role, mirror `leaves` / FR-DATA-001-002). See rules/coding-standards.md "no-hard-delete posture."
+- Canonical-vocabulary check: for any enum-like TEXT value shared across tables or DB↔app (leave_type, status, action, role), verify the exact stored value against seed.sql/schema (NOT the PRD's display labels) and name the single source of truth. See rules/coding-standards.md "canonical vocabulary."
 
 ## Epic → ADR → filename map
 | Epic | ADR (docs/arch-docs/) | Output filename |

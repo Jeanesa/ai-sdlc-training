@@ -27,3 +27,4 @@
 - Unit tests colocated as `*.test.{ts,tsx}` (DB-free, `npm run test`); integration tests in `tests/integration/` (`npm run test:integration`, needs the emulator). Vitest, not Jest
 - Migrations idempotent: `CREATE OR REPLACE FUNCTION`, `DROP POLICY/TRIGGER IF EXISTS` before CREATE
 - New business data stores (tables AND Storage buckets) block hard DELETE for all roles incl. service_role — removal only via soft-delete `deleted_at` (FR-DATA-001/002 retention); auth/session/ephemeral infra exempt
+- Enum-like TEXT shared across tables (leave_type, status, action, role) uses ONE canonical value (leave_type = leave_types.name full names, e.g. 'Annual Leave'); UI may display a short label but stores the canonical string — verify against seed.sql, not PRD prose
