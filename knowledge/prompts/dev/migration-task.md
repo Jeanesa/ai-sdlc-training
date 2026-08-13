@@ -1,4 +1,4 @@
-# Prompt Set — Database Schema Migration Task (EVAP)
+# Prompt Set — Database Schema Migration Task (EPAV)
 
 Four-phase prompt set (Evaluate → Plan → Apply → Validate) for implementing a versioned
 database migration. Built and proven on **TASK-008** (initial schema, epic-0).
