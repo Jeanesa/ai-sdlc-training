@@ -31,6 +31,12 @@ Supabase emulator. You report PASS/FAIL per AC and list every FAIL. You do not e
    service-role client (`rolbypassrls` → false pass). Empty read = empty data + null error; blocked write = `42501`.
 6. **Storage / platform triggers**: verify in the emulator, not a throwaway container (the `storage` schema and
    shipped triggers exist only in the emulator image).
+7. **Probe accuracy** — derive probe inputs from the ACTUAL code/migration convention (read the upload path, the
+   stored value format), never from an assumption; a wrong probe input yields a FALSE FAIL. Supabase Storage:
+   `storage.objects.name` is BUCKET-RELATIVE (it excludes the bucket id), so `(storage.foldername(name))[1]` is the
+   first folder INSIDE the bucket — probing with the bucket prefix in `name` falsely fails owner-path policies. If a
+   FAIL might be a probe artifact, re-derive the probe from the source before declaring it; if still unsure, mark
+   INCONCLUSIVE, never FAIL.
 
 ## Never
 - Never edit, fix, or write source — you REPORT; the developer fixes.
