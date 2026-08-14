@@ -1,6 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import StatusBadge from "@/components/StatusBadge";
+import { LEAVE_TYPE } from "@/lib/leave/validation";
+import type { LeaveStatus } from "@/types";
+
+const LEAVE_STATUSES: readonly LeaveStatus[] = ["PENDING", "APPROVED", "REJECTED", "CANCELLED"];
 
 function formatDate(d: string | undefined) {
   if (!d) return "";
@@ -9,24 +15,44 @@ function formatDate(d: string | undefined) {
   });
 }
 
+function isIsoDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  return !Number.isNaN(new Date(s + "T00:00:00").getTime());
+}
+
 export default function Confirmation() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const data = {
-    id: searchParams.get("id") || "REQ-2026-" + Math.floor(Math.random() * 900 + 100),
-    leaveType: searchParams.get("leaveType") || "Annual Leave",
-    startDate: searchParams.get("startDate") || new Date().toISOString().split("T")[0],
-    endDate: searchParams.get("endDate") || new Date().toISOString().split("T")[0],
-    workingDays: Number(searchParams.get("workingDays")) || 0,
-    reason: searchParams.get("reason") || "",
-    hasDocument: searchParams.get("hasDocument") === "1",
-  };
+  const id = searchParams.get("id") ?? "";
+  const leaveType = searchParams.get("leaveType") ?? "";
+  const startDate = searchParams.get("startDate") ?? "";
+  const endDate = searchParams.get("endDate") ?? "";
+  const rawWorkingDays = searchParams.get("workingDays") ?? "";
+  const status = searchParams.get("status") ?? "";
 
-  const submittedAt = new Date().toLocaleString("en-PH", {
-    month: "long", day: "numeric", year: "numeric",
-    hour: "numeric", minute: "2-digit", hour12: true,
-  });
+  const workingDays = Number(rawWorkingDays);
+  const workingDaysValid =
+    rawWorkingDays !== "" &&
+    Number.isFinite(workingDays) &&
+    Number.isInteger(workingDays) &&
+    workingDays >= 0;
+
+  const valid =
+    id.trim() !== "" &&
+    (LEAVE_TYPE as readonly string[]).includes(leaveType) &&
+    isIsoDate(startDate) &&
+    isIsoDate(endDate) &&
+    workingDaysValid &&
+    (LEAVE_STATUSES as readonly string[]).includes(status);
+
+  useEffect(() => {
+    if (!valid) {
+      router.replace("/employee/new-request?notice=invalid-request");
+    }
+  }, [router, valid]);
+
+  if (!valid) return null;
 
   return (
     <div className="p-6 lg:p-8 max-w-xl mx-auto">
@@ -48,32 +74,39 @@ export default function Confirmation() {
         <div className="px-8 py-5 text-center bg-gray-50 border-b border-gray-100">
           <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Request ID</p>
           <p
-            className="text-2xl font-semibold tracking-wider text-gray-900"
+            className="text-2xl font-semibold tracking-wider text-gray-900 break-all"
             style={{ fontFamily: "var(--font-mono)" }}
-            aria-label={`Request ID: ${data.id}`}
+            aria-label={`Request ID: ${id}`}
           >
-            {data.id}
+            {id}
           </p>
         </div>
 
         <div className="px-8 py-6 space-y-3">
           <h2 className="text-sm font-semibold text-gray-700 mb-4">Request Summary</h2>
 
-          {[
-            { label: "Leave Type", value: data.leaveType },
-            { label: "Start Date", value: formatDate(data.startDate) },
-            { label: "End Date", value: formatDate(data.endDate) },
-            { label: "Working Days", value: `${data.workingDays} ${data.workingDays === 1 ? "day" : "days"}` },
-            { label: "Reason", value: data.reason || "(not provided)" },
-            { label: "Supporting Document", value: data.hasDocument ? "Uploaded" : "None" },
-            { label: "Status", value: "Pending review" },
-            { label: "Submitted", value: submittedAt },
-          ].map((row) => (
-            <div key={row.label} className="flex justify-between gap-4 text-sm">
-              <span className="text-gray-500 flex-shrink-0">{row.label}</span>
-              <span className="text-gray-900 font-medium text-right">{row.value}</span>
-            </div>
-          ))}
+          <div className="flex justify-between gap-4 text-sm">
+            <span className="text-gray-500 flex-shrink-0">Leave Type</span>
+            <span className="text-gray-900 font-medium text-right">{leaveType}</span>
+          </div>
+          <div className="flex justify-between gap-4 text-sm">
+            <span className="text-gray-500 flex-shrink-0">Start Date</span>
+            <span className="text-gray-900 font-medium text-right">{formatDate(startDate)}</span>
+          </div>
+          <div className="flex justify-between gap-4 text-sm">
+            <span className="text-gray-500 flex-shrink-0">End Date</span>
+            <span className="text-gray-900 font-medium text-right">{formatDate(endDate)}</span>
+          </div>
+          <div className="flex justify-between gap-4 text-sm">
+            <span className="text-gray-500 flex-shrink-0">Working Days</span>
+            <span className="text-gray-900 font-medium text-right">
+              {workingDays} {workingDays === 1 ? "day" : "days"}
+            </span>
+          </div>
+          <div className="flex justify-between gap-4 text-sm items-center">
+            <span className="text-gray-500 flex-shrink-0">Status</span>
+            <StatusBadge status={status as LeaveStatus} />
+          </div>
         </div>
 
         <div className="mx-8 mb-6 px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-blue-800 flex items-start gap-2">

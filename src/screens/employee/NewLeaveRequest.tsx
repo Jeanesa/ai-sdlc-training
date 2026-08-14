@@ -44,7 +44,7 @@ function formatDate(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" });
 }
 
-export default function NewLeaveRequest() {
+export default function NewLeaveRequest({ notice }: { notice?: string | null }) {
   const router = useRouter();
   const [leaveType, setLeaveType] = useState<LeaveTypeName | "">("");
   const [startDate, setStartDate] = useState("");
@@ -130,6 +130,16 @@ export default function NewLeaveRequest() {
         </h1>
         <p className="text-sm text-gray-500 mt-1">Fill in the details below to submit your leave request.</p>
       </div>
+
+      {/* preserve through TASK-031: notice banner (TASK-028 renders it via page.tsx searchParams prop) */}
+      {notice === "invalid-request" && (
+        <div className="mb-6 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start gap-2" role="alert">
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span>That confirmation link is missing or invalid. Please submit a new request.</span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
         <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
