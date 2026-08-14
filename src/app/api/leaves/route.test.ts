@@ -2,10 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { POST } from "@/app/api/leaves/route";
+import { GET, POST } from "@/app/api/leaves/route";
 import { requireSelfServiceUser } from "@/lib/auth/self-service";
 import type { DbRole } from "@/lib/auth/route-guards";
-import { SupportingDocError, uploadSupportingDoc } from "@/lib/leave/storage";
+import {
+  SupportingDocError,
+  getSupportingDocSignedUrl,
+  uploadSupportingDoc,
+} from "@/lib/leave/storage";
 import { notificationDispatcher } from "@/lib/notifications";
 import { createProxyClient, getSessionUserId } from "@/lib/supabase/proxy";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -21,7 +25,11 @@ vi.mock("@/lib/auth/self-service", () => ({
 
 vi.mock("@/lib/leave/storage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/leave/storage")>();
-  return { ...actual, uploadSupportingDoc: vi.fn() };
+  return {
+    ...actual,
+    uploadSupportingDoc: vi.fn(),
+    getSupportingDocSignedUrl: vi.fn(),
+  };
 });
 
 vi.mock("@/lib/supabase/service", () => ({
@@ -46,6 +54,7 @@ type TableName = "leave_balances" | "leaves" | "profiles";
 interface FakeClientConfig {
   balances?: { total_days: number; used_days: number } | null;
   leaves?: { id: string } | null;
+  leavesList?: unknown[] | null;
   profile?: { full_name: string | null } | null;
   errors?: Partial<Record<TableName, unknown>>;
 }
@@ -57,6 +66,7 @@ interface QueryLog {
   isCalls: unknown[][];
   lteCalls: unknown[][];
   gteCalls: unknown[][];
+  orderCalls: unknown[][];
 }
 
 function makeFrom(config: Required<FakeClientConfig>): {
@@ -72,6 +82,7 @@ function makeFrom(config: Required<FakeClientConfig>): {
       isCalls: [],
       lteCalls: [],
       gteCalls: [],
+      orderCalls: [],
     };
     logs.push(log);
     const tableError = (config.errors as Record<string, unknown> | undefined)?.[table];
@@ -110,6 +121,14 @@ function makeFrom(config: Required<FakeClientConfig>): {
       gte: vi.fn((...args: unknown[]) => {
         log.gteCalls.push(args);
         return chain;
+      }),
+      order: vi.fn((...args: unknown[]) => {
+        log.orderCalls.push(args);
+        return Promise.resolve(
+          tableError !== undefined
+            ? { data: null, error: tableError }
+            : { data: table === "leaves" ? config.leavesList : null, error: null },
+        );
       }),
       maybeSingle,
     };
@@ -156,6 +175,7 @@ function installHarness(options: HarnessOptions = {}): {
   const { from, logs } = makeFrom({
     balances: options.balances === undefined ? { total_days: 15, used_days: 0 } : options.balances,
     leaves: options.leaves === undefined ? null : options.leaves,
+    leavesList: null,
     profile: options.profile === undefined ? { full_name: "Andres Lopez" } : options.profile,
     errors: options.errors ?? {},
   });
@@ -193,6 +213,7 @@ beforeEach(() => {
   vi.mocked(getSessionUserId).mockReset();
   vi.mocked(requireSelfServiceUser).mockReset();
   vi.mocked(uploadSupportingDoc).mockReset();
+  vi.mocked(getSupportingDocSignedUrl).mockReset();
   vi.mocked(createServiceClient).mockReset();
   vi.mocked(notificationDispatcher.sendNewRequestToManager).mockReset();
 });
@@ -586,5 +607,186 @@ describe("POST /api/leaves", () => {
 
     expect(res.status).toBe(500);
     expect((await res.json()).error.code).toBe("SUBMIT_FAILED");
+  });
+});
+
+const FIXTURE_ANNUAL = {
+  id: "20000000-0000-4000-8000-000000000201",
+  leave_type: "Annual Leave",
+  start_date: START_DATE,
+  end_date: END_DATE,
+  status: "PENDING",
+  created_at: "2030-06-03T09:00:00.000Z",
+  manager_note: null,
+  supporting_doc_url: null,
+} as const;
+
+const FIXTURE_SICK = {
+  id: "20000000-0000-4000-8000-000000000202",
+  leave_type: "Sick Leave",
+  start_date: "2030-07-01",
+  end_date: "2030-07-01",
+  status: "APPROVED",
+  created_at: "2030-06-01T09:00:00.000Z",
+  manager_note: "Get well soon.",
+  supporting_doc_url: `${CALLER_ID}/aaaaaaaa-0000-4000-8000-000000000000.pdf`,
+} as const;
+
+const FIXTURE_LEAVES = [FIXTURE_ANNUAL, FIXTURE_SICK];
+
+function installGetHarness(options: {
+  sessionUserId?: string | null;
+  caller?: { id: string; role: DbRole; managerId: string | null } | null;
+  leavesList?: unknown[] | null;
+  errors?: Partial<Record<TableName, unknown>>;
+} = {}): {
+  request: NextRequest;
+  response: NextResponse;
+  from: ReturnType<typeof vi.fn>;
+  logs: QueryLog[];
+} {
+  const request = new NextRequest(new URL("http://localhost:3000/api/leaves"), {
+    method: "GET",
+  });
+  const response = NextResponse.next({ request });
+  const { from, logs } = makeFrom({
+    balances: null,
+    leaves: null,
+    leavesList: options.leavesList === undefined ? null : options.leavesList,
+    profile: null,
+    errors: options.errors ?? {},
+  });
+  vi.mocked(createProxyClient).mockReturnValue({
+    supabase: { from } as unknown as SupabaseClient,
+    response,
+  });
+  vi.mocked(getSessionUserId).mockResolvedValue(
+    options.sessionUserId === undefined ? CALLER_ID : options.sessionUserId,
+  );
+  vi.mocked(requireSelfServiceUser).mockResolvedValue(
+    options.caller === undefined ? CALLER : options.caller,
+  );
+  return { request, response, from, logs };
+}
+
+describe("GET /api/leaves", () => {
+  it("returns 401 for an unauthenticated caller with no DB reads", async () => {
+    const { request, from } = installGetHarness({ sessionUserId: null });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "UNAUTHENTICATED", message: "Authentication required." },
+    });
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for sys_admin (guard returns null) with no DB reads", async () => {
+    const { request, from } = installGetHarness({ caller: null });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "FORBIDDEN", message: "This account cannot submit leave requests." },
+    });
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("returns only the caller's rows, filtering employee_id, deleted_at IS NULL, ordered created_at desc", async () => {
+    const { request, logs } = installGetHarness({ leavesList: FIXTURE_LEAVES });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([
+      {
+        id: FIXTURE_ANNUAL.id,
+        leaveType: "Annual Leave",
+        startDate: START_DATE,
+        endDate: END_DATE,
+        workingDays: 3,
+        status: "PENDING",
+        createdAt: "2030-06-03T09:00:00.000Z",
+        managerNote: null,
+        supportingDocPath: null,
+      },
+      {
+        id: FIXTURE_SICK.id,
+        leaveType: "Sick Leave",
+        startDate: "2030-07-01",
+        endDate: "2030-07-01",
+        workingDays: 1,
+        status: "APPROVED",
+        createdAt: "2030-06-01T09:00:00.000Z",
+        managerNote: "Get well soon.",
+        supportingDocPath: `${CALLER_ID}/aaaaaaaa-0000-4000-8000-000000000000.pdf`,
+      },
+    ]);
+
+    const leavesLog = logs.find((log) => log.table === "leaves");
+    expect(leavesLog?.selectCalls).toEqual([
+      ["id, leave_type, start_date, end_date, status, created_at, manager_note, supporting_doc_url"],
+    ]);
+    expect(leavesLog?.eqCalls).toEqual([["employee_id", CALLER_ID]]);
+    expect(leavesLog?.isCalls).toEqual([["deleted_at", null]]);
+    expect(leavesLog?.orderCalls).toEqual([["created_at", { ascending: false }]]);
+  });
+
+  it("maps rows to the FR-LVR-006 shape and never selects or emits reason", async () => {
+    const { request, logs } = installGetHarness({ leavesList: FIXTURE_LEAVES });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body[0]).not.toHaveProperty("reason");
+    const leavesLog = logs.find((log) => log.table === "leaves");
+    expect(leavesLog?.selectCalls).toEqual([
+      ["id, leave_type, start_date, end_date, status, created_at, manager_note, supporting_doc_url"],
+    ]);
+  });
+
+  it("never mints a signed URL and emits no url field on list rows (A4)", async () => {
+    const { request } = installGetHarness({ leavesList: FIXTURE_LEAVES });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body[0]).not.toHaveProperty("url");
+    expect(body[1]).not.toHaveProperty("url");
+    expect(getSupportingDocSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty array when the caller has no leave requests", async () => {
+    const { request } = installGetHarness({ leavesList: [] });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([]);
+  });
+
+  it("returns 500 when the history read fails", async () => {
+    const { request } = installGetHarness({ errors: { leaves: { message: "db down" } } });
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "LEAVES_READ_FAILED", message: "Could not read leave history." },
+    });
+  });
+
+  it("propagates proxy response cookies onto the 200 response", async () => {
+    const { request, response } = installGetHarness({ leavesList: [] });
+    response.cookies.set("sb-refresh-token", "rotated");
+
+    const res = await GET(request);
+
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("sb-refresh-token")?.value).toBe("rotated");
   });
 });

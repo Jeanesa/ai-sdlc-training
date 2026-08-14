@@ -268,3 +268,56 @@ export async function POST(request: NextRequest) {
     201,
   );
 }
+
+export async function GET(request: NextRequest) {
+  const { supabase, response } = createProxyClient(request);
+
+  const userId = await getSessionUserId(supabase);
+  if (userId === null) {
+    return jsonWithHeaders(
+      response,
+      { error: { code: "UNAUTHENTICATED", message: "Authentication required." } },
+      401,
+    );
+  }
+
+  const caller = await requireSelfServiceUser(supabase);
+  if (caller === null) {
+    return jsonWithHeaders(
+      response,
+      { error: { code: "FORBIDDEN", message: "This account cannot submit leave requests." } },
+      403,
+    );
+  }
+
+  const { data: rows, error } = await supabase
+    .from("leaves")
+    .select(
+      "id, leave_type, start_date, end_date, status, created_at, manager_note, supporting_doc_url",
+    )
+    .eq("employee_id", caller.id)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return jsonWithHeaders(
+      response,
+      { error: { code: "LEAVES_READ_FAILED", message: "Could not read leave history." } },
+      500,
+    );
+  }
+
+  const history = (rows ?? []).map((row) => ({
+    id: row.id,
+    leaveType: row.leave_type,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    workingDays: countWorkingDays(row.start_date, row.end_date),
+    status: row.status,
+    createdAt: row.created_at,
+    managerNote: row.manager_note ?? null,
+    supportingDocPath: row.supporting_doc_url ?? null,
+  }));
+
+  return jsonWithHeaders(response, history, 200);
+}
