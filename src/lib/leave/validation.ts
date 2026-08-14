@@ -80,7 +80,7 @@ export const BLOCKABLE_LEAVE_TYPES = [ANNUAL_LEAVE, SICK_LEAVE] as const;
 
 export const EXEMPT_LEAVE_TYPES = [EMERGENCY_LEAVE, UNPAID_LEAVE] as const;
 
-const MAX_SUPPORTING_FILE_BYTES = 5_242_880;
+export const MAX_SUPPORTING_FILE_BYTES = 5_242_880;
 
 /**
  * validateLeaveDates(startDate, endDate, today) — validates the requested
