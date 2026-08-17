@@ -1,9 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { User } from "@/types";
-import { MY_BALANCES, MY_REQUESTS } from "@/data/mockData";
+import { MY_BALANCES } from "@/data/mockData";
 import StatusBadge from "@/components/StatusBadge";
+import {
+  type LeaveHistoryRow,
+  formatDateOnly,
+} from "./my-requests-helpers";
 
 interface Props {
   user: User;
@@ -16,17 +21,35 @@ const LEAVE_TYPE_META: Record<string, { color: string; bg: string; icon: string 
   "Unpaid Leave": { color: "#6b7280", bg: "#f9fafb", icon: "\u{1F4CB}" },
 };
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-PH", {
-    month: "short", day: "numeric", year: "numeric",
-  });
-}
-
 export default function Dashboard({ user }: Props) {
   const router = useRouter();
-  const recentRequests = MY_REQUESTS.slice(0, 5);
+  const [recentRequests, setRecentRequests] = useState<LeaveHistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const today = new Date();
   const greeting = today.getHours() < 12 ? "Good morning" : today.getHours() < 18 ? "Good afternoon" : "Good evening";
+
+  async function loadRows() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/leaves");
+      if (!res.ok) {
+        setError("Could not load your leave requests. Please try again.");
+        return;
+      }
+      const data = (await res.json()) as LeaveHistoryRow[];
+      setRecentRequests(data.slice(0, 5));
+    } catch {
+      setError("Could not load your leave requests. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadRows();
+  }, []);
 
   return (
     <div className="p-6 lg:p-8 max-w-5xl mx-auto">
@@ -129,7 +152,22 @@ export default function Dashboard({ user }: Props) {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          {recentRequests.length === 0 ? (
+          {loading ? (
+            <div className="py-16 text-center">
+              <p className="text-sm text-gray-500">Loading your leave requests...</p>
+            </div>
+          ) : error !== null ? (
+            <div className="py-16 text-center">
+              <p className="text-sm text-red-600 mb-3">{error}</p>
+              <button
+                onClick={() => void loadRows()}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                style={{ backgroundColor: "#1a3a5c" }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : recentRequests.length === 0 ? (
             <div className="py-16 text-center">
               <svg className="w-10 h-10 text-gray-200 mx-auto mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
@@ -168,7 +206,7 @@ export default function Dashboard({ user }: Props) {
                       <td className="px-4 py-3 font-mono text-xs text-gray-600">{req.id}</td>
                       <td className="px-4 py-3 text-gray-800 font-medium">{req.leaveType}</td>
                       <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">
-                        {formatDate(req.startDate)} &ndash; {formatDate(req.endDate)}
+                        {formatDateOnly(req.startDate)} &ndash; {formatDateOnly(req.endDate)}
                       </td>
                       <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{req.workingDays}d</td>
                       <td className="px-4 py-3">
