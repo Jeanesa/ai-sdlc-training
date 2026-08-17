@@ -1,118 +1,202 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { LeaveTypeName } from "@/types";
-import { MY_BALANCES, MY_REQUESTS } from "@/data/mockData";
+import { LEAVE_TYPE, EXEMPT_LEAVE_TYPES, validateBalance, validateLeaveDates, validateReason, validateSupportingFile } from "@/lib/leave/validation";
+import { countWorkingDays } from "@/lib/leave/working-days";
+import { createClient } from "@/lib/supabase/client";
 
-const LEAVE_TYPES: { name: LeaveTypeName; balanceKey: string }[] = [
-  { name: "Annual Leave", balanceKey: "Annual Leave" },
-  { name: "Sick Leave", balanceKey: "Sick Leave" },
-  { name: "Emergency Leave", balanceKey: "Emergency Leave" },
-  { name: "Unpaid Leave", balanceKey: "Unpaid Leave" },
-];
-
-function countWorkingDays(start: string, end: string): number {
-  if (!start || !end) return 0;
-  let count = 0;
-  const cur = new Date(start + "T00:00:00");
-  const endDate = new Date(end + "T00:00:00");
-  while (cur <= endDate) {
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
+interface BalanceRow {
+  leave_type: string;
+  total_days: number;
+  used_days: number;
 }
 
-function hasConflict(start: string, end: string): boolean {
-  if (!start || !end) return false;
-  const s = new Date(start + "T00:00:00");
-  const e = new Date(end + "T00:00:00");
-  return MY_REQUESTS.some((r) => {
-    if (r.status !== "APPROVED") return false;
-    const rs = new Date(r.startDate + "T00:00:00");
-    const re = new Date(r.endDate + "T00:00:00");
-    return !(e < rs || s > re);
-  });
+interface ApprovedLeave {
+  startDate: string;
+  endDate: string;
 }
 
-const today = new Date().toISOString().split("T")[0];
+function localToday() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 function formatDate(d: string) {
   if (!d) return "";
-  return new Date(d + "T00:00:00").toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" });
+  return new Date(d + "T00:00:00").toLocaleDateString("en-PH", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 export default function NewLeaveRequest({ notice }: { notice?: string | null }) {
   const router = useRouter();
-  const [leaveType, setLeaveType] = useState<LeaveTypeName | "">("");
+  const [leaveType, setLeaveType] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [fileError, setFileError] = useState("");
-  const [reasonTouched, setReasonTouched] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
-  const balance = leaveType
-    ? MY_BALANCES.find((b) => b.leaveType === leaveType)
-    : null;
+  const [balanceRows, setBalanceRows] = useState<BalanceRow[]>([]);
+  const [approvedLeaves, setApprovedLeaves] = useState<ApprovedLeave[]>([]);
+
+  useEffect(() => {
+    const currentYear = new Date().getUTCFullYear();
+    void createClient()
+      .from("leave_balances")
+      .select("leave_type, total_days, used_days")
+      .is("deleted_at", null)
+      .eq("year", currentYear)
+      .then(
+        (result: { data: BalanceRow[] | null }) => {
+          if (result.data) setBalanceRows(result.data);
+        },
+        () => {},
+      );
+
+    fetch("/api/leaves")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows: unknown) => {
+        if (Array.isArray(rows)) {
+          setApprovedLeaves(
+            rows
+              .filter(
+                (r: { status?: string }) =>
+                  (r as { status?: string }).status === "APPROVED",
+              )
+              .map((r: { startDate: string; endDate: string }) => ({
+                startDate: r.startDate,
+                endDate: r.endDate,
+              })),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const isExempt = EXEMPT_LEAVE_TYPES.some((t) => t === leaveType);
+  const balanceRow = balanceRows.find((r) => r.leave_type === leaveType);
+  const remaining =
+    balanceRow != null
+      ? balanceRow.total_days - balanceRow.used_days
+      : null;
+
+  const conflict =
+    startDate &&
+    endDate &&
+    approvedLeaves.some(
+      (r) =>
+        !(endDate < r.startDate || startDate > r.endDate),
+    );
+
+  const todayStr = localToday();
+
+  const datesResult = validateLeaveDates(startDate, endDate, todayStr);
+  const reasonResult = validateReason(reason);
+  const fileResult = validateSupportingFile(file, leaveType);
+  const balanceResult = validateBalance(leaveType, remaining);
+
+  const shouldShowError = (field: string) =>
+    touched[field] === true || submitAttempted;
+
+  function showError(field: string): string | null {
+    if (!shouldShowError(field)) return null;
+    return errors[field] ?? null;
+  }
 
   const workingDays = countWorkingDays(startDate, endDate);
-  const conflict = hasConflict(startDate, endDate);
 
-  const isExempt = leaveType === "Emergency Leave" || leaveType === "Unpaid Leave";
-  const zeroBalance = balance && !isExempt && balance.remainingDays === 0;
-
-  const startDateError = submitAttempted && !startDate ? "Start date is required." : "";
-  const endDateError =
-    submitAttempted && !endDate
-      ? "End date is required."
-      : endDate && startDate && endDate < startDate
-      ? "End date must be on or after start date."
-      : "";
-  const reasonError =
-    (reasonTouched || submitAttempted) && reason.length > 0 && reason.length < 10
-      ? "Reason must be at least 10 characters."
-      : submitAttempted && reason.length === 0
-      ? "Reason is required."
-      : "";
-
-  const canSubmit =
-    leaveType && startDate && endDate && !endDateError && reason.length >= 10 && !zeroBalance && !fileError;
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    setFileError("");
-    setFile(null);
-    if (!f) return;
-    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"];
-    if (!allowed.includes(f.type)) {
-      setFileError("Only PDF and image files (JPEG, PNG, GIF, WebP) are accepted.");
-      return;
-    }
-    if (f.size > 5 * 1024 * 1024) {
-      setFileError("File size must not exceed 5MB.");
-      return;
-    }
-    setFile(f);
-  }
+  const zeroBalanceBlock = !isExempt && !balanceResult.ok && balanceResult.code === "BALANCE_ZERO";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitAttempted(true);
-    setReasonTouched(true);
-    if (!canSubmit) return;
-    const params = new URLSearchParams({
-      leaveType: leaveType as string,
-      startDate,
-      endDate,
-      workingDays: String(workingDays),
-      reason,
-      hasDocument: file ? "1" : "0",
-    });
-    router.push(`/employee/confirmation?${params.toString()}`);
+    setTouched((prev) => ({ ...prev, reason: true }));
+
+    const newErrors: Record<string, string> = {};
+
+    if (!datesResult.ok) {
+      const field =
+        datesResult.code === "END_BEFORE_START" ? "endDate" : "startDate";
+      newErrors[field] = datesResult.message;
+    }
+
+    if (!reasonResult.ok) {
+      newErrors["reason"] = reasonResult.message;
+    }
+
+    if (!fileResult.ok) {
+      newErrors["file"] = fileResult.message;
+    }
+
+    if (!balanceResult.ok) {
+      newErrors["balance"] = balanceResult.message;
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setErrors({});
+    setSubmitting(true);
+
+    const formData = new FormData();
+    formData.append("leaveType", leaveType);
+    formData.append("startDate", startDate);
+    formData.append("endDate", endDate);
+    formData.append("reason", reason);
+    if (file) formData.append("file", file);
+
+    fetch("/api/leaves", { method: "POST", body: formData })
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          const params = new URLSearchParams({
+            id: data.id,
+            leaveType: data.leaveType,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            workingDays: String(data.workingDays),
+            status: data.status,
+          });
+          router.push(`/employee/confirmation?${params.toString()}`);
+          return;
+        }
+
+        const body = await res.json();
+
+        if (res.status === 422) {
+          setErrors({ balance: body.error.message });
+          return;
+        }
+
+        if (res.status === 400 && body.fields) {
+          const fieldErrors: Record<string, string> = {};
+          for (const [key, val] of Object.entries(body.fields) as [string, { message: string }][]) {
+            fieldErrors[key] = val.message;
+          }
+          setErrors(fieldErrors);
+          return;
+        }
+
+        setErrors({ server: "Something went wrong. Please try again." });
+      })
+      .catch(() => {
+        setErrors({ server: "Something went wrong. Please try again." });
+      })
+      .finally(() => {
+        setSubmitting(false);
+      });
   }
 
   return (
@@ -131,13 +215,21 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
         <p className="text-sm text-gray-500 mt-1">Fill in the details below to submit your leave request.</p>
       </div>
 
-      {/* preserve through TASK-031: notice banner (TASK-028 renders it via page.tsx searchParams prop) */}
       {notice === "invalid-request" && (
         <div className="mb-6 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start gap-2" role="alert">
           <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
           <span>That confirmation link is missing or invalid. Please submit a new request.</span>
+        </div>
+      )}
+
+      {errors.server && (
+        <div className="mb-6 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start gap-2" role="alert">
+          <svg className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span>{errors.server}</span>
         </div>
       )}
 
@@ -150,40 +242,73 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
             <select
               id="leaveType"
               value={leaveType}
-              onChange={(e) => setLeaveType(e.target.value as LeaveTypeName)}
+              onChange={(e) => {
+                setLeaveType(e.target.value);
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next["balance"];
+                  return next;
+                });
+              }}
               className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] focus:border-transparent"
               required
             >
               <option value="">Select leave type...</option>
-              {LEAVE_TYPES.map((lt) => <option key={lt.name} value={lt.name}>{lt.name}</option>)}
+              {LEAVE_TYPE.map((lt) => (
+                <option key={lt} value={lt}>
+                  {lt}
+                </option>
+              ))}
             </select>
 
-            {balance && (
-              <div className={`mt-3 flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${
-                zeroBalance ? "bg-red-50 border border-red-200" : "bg-blue-50 border border-blue-100"
-              }`}>
-                <svg className={`w-4 h-4 flex-shrink-0 ${zeroBalance ? "text-red-500" : "text-blue-500"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+            {leaveType && (balanceRows.length > 0 || isExempt) && (
+              <div
+                className={`mt-3 flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${
+                  zeroBalanceBlock
+                    ? "bg-red-50 border border-red-200"
+                    : "bg-blue-50 border border-blue-100"
+                }`}
+              >
+                <svg
+                  className={`w-4 h-4 flex-shrink-0 ${
+                    zeroBalanceBlock ? "text-red-500" : "text-blue-500"
+                  }`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
                 <div>
-                  {leaveType === "Unpaid Leave" ? (
-                    <span className="text-blue-800">Unpaid Leave has no balance limit.</span>
-                  ) : leaveType === "Emergency Leave" ? (
+                  {isExempt && remaining === null ? (
                     <span className="text-blue-800">
-                      Emergency Leave balance: <strong>{balance.remainingDays}</strong> of {balance.totalDays} days remaining.
+                      Unpaid Leave has no balance limit.
+                    </span>
+                  ) : isExempt ? (
+                    <span className="text-blue-800">
+                      Remaining balance: <strong>{remaining}</strong> days.
                       Not subject to balance restriction.
                     </span>
-                  ) : zeroBalance ? (
+                  ) : zeroBalanceBlock ? (
                     <span className="text-red-800 font-medium">
                       You have no remaining {leaveType} balance for this year.
                     </span>
-                  ) : (
+                  ) : remaining !== null ? (
                     <span className="text-blue-800">
-                      Remaining balance: <strong>{balance.remainingDays}</strong> of {balance.totalDays} days.
+                      Remaining balance: <strong>{remaining}</strong> days.
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
+            )}
+
+            {leaveType && showError("balance") && (
+              <p className="mt-2 text-xs text-red-600" role="alert">
+                {showError("balance")}
+              </p>
             )}
           </div>
 
@@ -196,14 +321,23 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
                 <input
                   id="startDate"
                   type="date"
-                  min={today}
+                  min={todayStr}
                   value={startDate}
-                  onChange={(e) => { setStartDate(e.target.value); if (endDate && e.target.value > endDate) setEndDate(""); }}
-                  className={`w-full px-3.5 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] ${startDateError ? "border-red-400" : "border-gray-300"}`}
-                  aria-invalid={!!startDateError}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    if (endDate && e.target.value > endDate) setEndDate("");
+                  }}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] ${
+                    showError("startDate") ? "border-red-400" : "border-gray-300"
+                  }`}
+                  aria-invalid={showError("startDate") !== null}
                   required
                 />
-                {startDateError && <p className="mt-1 text-xs text-red-600" role="alert">{startDateError}</p>}
+                {showError("startDate") && (
+                  <p className="mt-1 text-xs text-red-600" role="alert">
+                    {showError("startDate")}
+                  </p>
+                )}
               </div>
               <div>
                 <label htmlFor="endDate" className="block text-sm font-semibold text-gray-700 mb-1.5">
@@ -212,18 +346,24 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
                 <input
                   id="endDate"
                   type="date"
-                  min={startDate || today}
+                  min={startDate || todayStr}
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className={`w-full px-3.5 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] ${endDateError ? "border-red-400" : "border-gray-300"}`}
-                  aria-invalid={!!endDateError}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] ${
+                    showError("endDate") ? "border-red-400" : "border-gray-300"
+                  }`}
+                  aria-invalid={showError("endDate") !== null}
                   required
                 />
-                {endDateError && <p className="mt-1 text-xs text-red-600" role="alert">{endDateError}</p>}
+                {showError("endDate") && (
+                  <p className="mt-1 text-xs text-red-600" role="alert">
+                    {showError("endDate")}
+                  </p>
+                )}
               </div>
             </div>
 
-            {startDate && endDate && !endDateError && (
+            {startDate && endDate && !datesResult.ok && datesResult.code === "END_BEFORE_START" ? null : startDate && endDate && datesResult.ok ? (
               <div className="mt-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm text-gray-700">
                   <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -246,7 +386,7 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="p-6">
@@ -259,16 +399,22 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              onBlur={() => setReasonTouched(true)}
+              onBlur={() => setTouched((prev) => ({ ...prev, reason: true }))}
               placeholder="Briefly describe the reason for your leave..."
-              className={`w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] ${reasonError ? "border-red-400" : "border-gray-300"}`}
+              className={`w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] ${
+                showError("reason") ? "border-red-400" : "border-gray-300"
+              }`}
               aria-describedby="reason-hint"
-              aria-invalid={!!reasonError}
+              aria-invalid={showError("reason") !== null}
               required
             />
             <div className="mt-1.5 flex justify-between items-center">
               <div>
-                {reasonError && <p className="text-xs text-red-600" role="alert">{reasonError}</p>}
+                {showError("reason") && (
+                  <p className="text-xs text-red-600" role="alert">
+                    {showError("reason")}
+                  </p>
+                )}
               </div>
               <span
                 id="reason-hint"
@@ -286,13 +432,40 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
                 Supporting Document
                 <span className="ml-1 font-normal text-gray-400">(optional &mdash; PDF or image, max 5MB)</span>
               </label>
-              <div className={`relative border-2 border-dashed rounded-lg px-4 py-6 text-center transition-colors ${
-                fileError ? "border-red-300 bg-red-50" : file ? "border-green-300 bg-green-50" : "border-gray-200 bg-gray-50 hover:border-gray-300"
-              }`}>
+              <div
+                className={`relative border-2 border-dashed rounded-lg px-4 py-6 text-center transition-colors ${
+                  showError("file")
+                    ? "border-red-300 bg-red-50"
+                    : file
+                    ? "border-green-300 bg-green-50"
+                    : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                }`}
+              >
                 <input
                   type="file"
                   accept=".pdf,image/*"
-                  onChange={handleFileChange}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFile(f);
+                    if (f) {
+                      const result = validateSupportingFile(f, leaveType);
+                      setErrors((prev) => {
+                        const next = { ...prev };
+                        if (result.ok) {
+                          delete next["file"];
+                        } else {
+                          next["file"] = result.message;
+                        }
+                        return next;
+                      });
+                    } else {
+                      setErrors((prev) => {
+                        const next = { ...prev };
+                        delete next["file"];
+                        return next;
+                      });
+                    }
+                  }}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   aria-label="Upload supporting document"
                 />
@@ -312,10 +485,10 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
                   </>
                 )}
               </div>
-              {fileError && (
+              {showError("file") && (
                 <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1" role="alert">
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                  {fileError}
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                  {showError("file")}
                 </p>
               )}
             </div>
@@ -331,13 +504,15 @@ export default function NewLeaveRequest({ notice }: { notice?: string | null }) 
             </button>
             <button
               type="submit"
-              disabled={!!zeroBalance}
-              title={zeroBalance ? `You have no remaining ${leaveType} balance.` : undefined}
+              disabled={zeroBalanceBlock || submitting}
+              {...(zeroBalanceBlock
+                ? { title: `You have no remaining ${leaveType} balance.` }
+                : {})}
               className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-all focus:outline-none focus:ring-2 focus:ring-[#1a3a5c] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: "#1a3a5c" }}
-              aria-disabled={!!zeroBalance}
+              aria-disabled={zeroBalanceBlock}
             >
-              Submit Request
+              {submitting ? "Submitting..." : "Submit Request"}
             </button>
           </div>
         </div>
